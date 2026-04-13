@@ -1,0 +1,5 @@
+# Keychron M7 direct USB hidraw access.
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="3434", ATTRS{idProduct}=="d044", TAG+="uaccess"
+
+# Keychron M7 receiver hidraw access.
+SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="3434", ATTRS{idProduct}=="d030", TAG+="uaccess"

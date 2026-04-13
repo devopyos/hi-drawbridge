@@ -1,0 +1,83 @@
+version: "2"
+
+run:
+  concurrency: 4
+  timeout: 5m
+  tests: true
+  relative-path-mode: gomod
+  modules-download-mode: readonly
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - durationcheck
+    - dupword
+    - errcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocritic
+    - gocyclo
+    - gosec
+    - govet
+    - ineffassign
+    - intrange
+    - loggercheck
+    - misspell
+    - modernize
+    - nilerr
+    - nilnil
+    - nolintlint
+    - noctx
+    - predeclared
+    - reassign
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+    - staticcheck
+    - thelper
+    - unconvert
+    - unused
+    - usestdlibvars
+    - usetesting
+
+  exclusions:
+    warn-unused: true
+    rules:
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - gosec
+          - modernize
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    gocyclo:
+      min-complexity: 14
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+
+  settings:
+    gofumpt:
+      extra-rules: true
+
+  exclusions:
+    warn-unused: true
+    generated: lax

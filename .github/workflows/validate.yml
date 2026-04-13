@@ -1,0 +1,136 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "21 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Verify module cache
+        run: go mod verify
+
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Build
+        run: go build ./...
+
+      - name: Run tests
+        run: go test -shuffle=on -count=1 ./...
+
+      - name: Run race tests
+        run: go test -race ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check coverage build
+        run: go test -cover ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name != 'schedule'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          install-only: true
+          verify: true
+          version: v2.11.4
+
+      - name: Check formatting
+        run: golangci-lint fmt --diff
+
+      - name: Run linters
+        run: golangci-lint run --timeout 5m --modules-download-mode=readonly ./...
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4

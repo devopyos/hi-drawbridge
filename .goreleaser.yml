@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+
+version: 2
+
+project_name: hi-drawbridge
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: hi-drawbridge
+    main: ./cmd/hi-drawbridge
+    binary: hi-drawbridge
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: release-archives
+    ids:
+      - hi-drawbridge
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ title .Os }}_{{ if eq .Arch \"amd64\" }}x86_64{{ else }}{{ .Arch }}{{ end }}"
+    files:
+      - README.md
+      - docs/manual-setup.md
+      - docs/profile-authoring.md
+      - packaging/systemd-user/*
+      - packaging/udev-rules/*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"

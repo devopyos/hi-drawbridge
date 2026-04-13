@@ -1,0 +1,12 @@
+[Unit]
+Description=HI-Drawbridge Service
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/bin/hi-drawbridge serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

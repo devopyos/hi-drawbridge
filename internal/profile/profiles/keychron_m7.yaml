@@ -1,0 +1,35 @@
+id: keychron_m7
+name: Keychron M7
+vendor_id: "3434"
+transport_product_ids:
+  usb_direct: d044
+  receiver: d030
+
+device_type: mouse
+icon_name: input-mouse
+# The receiver can emit ack-like interrupt frames such as 54 e4 01 00...
+# that structurally match the fallback shape but do not carry trustworthy
+# battery data. Prefer the feature path and fail rather than lie.
+probe_path: feature_only
+
+wake_report_hex: 00b200000000000000000000000000000000000000000000000000000000000000
+
+query_report_id: 81
+prime_query_cmd: 7
+battery_query_cmd: 6
+query_length: 21
+expected_signature_hex: 343444d0
+battery_offset: 11
+status_offset: 12
+
+fallback_input_report_id: 84
+fallback_input_cmd: 228
+fallback_input_length: 21
+fallback_battery_offset: 2
+fallback_battery_bucket_max: 4
+charging_status_bytes: [1]
+
+query_endpoint:
+  required_feature_report_ids: [81]
+wake_endpoint:
+  interface_numbers: [3]
