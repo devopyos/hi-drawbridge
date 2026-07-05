@@ -72,18 +72,31 @@ func parseHidID(hidID string) (vendorID, productID string, err error) {
 }
 
 func readInterfaceNumber(deviceLink string) *int {
-	ifacePath := filepath.Join(deviceLink, "bInterfaceNumber")
-	data, err := discoveryReadFile(ifacePath)
-	if err != nil {
-		return nil
+	paths := []string{filepath.Join(deviceLink, "bInterfaceNumber")}
+
+	resolved, err := discoveryEvalLinks(deviceLink)
+	if err == nil {
+		parentPath := filepath.Join(filepath.Dir(resolved), "bInterfaceNumber")
+		if parentPath != paths[0] {
+			paths = append(paths, parentPath)
+		}
 	}
 
-	val, err := parseHexInt(strings.TrimSpace(string(data)))
-	if err != nil {
-		return nil
+	for _, ifacePath := range paths {
+		data, err := discoveryReadFile(ifacePath)
+		if err != nil {
+			continue
+		}
+
+		val, err := parseHexInt(strings.TrimSpace(string(data)))
+		if err != nil {
+			return nil
+		}
+
+		return &val
 	}
 
-	return &val
+	return nil
 }
 
 func parseHexInt(s string) (int, error) {

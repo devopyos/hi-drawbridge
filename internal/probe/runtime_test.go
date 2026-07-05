@@ -181,7 +181,7 @@ func TestRunPrimeFeatureQueryBranches(t *testing.T) {
 		t.Fatalf("expected send error to be recorded, got %v", state.lastError)
 	}
 
-	// recv error path with EPIPE
+	// recv error path with EPIPE keeps feature reads enabled for feature-only profiles.
 	probeSendQuery = func(context.Context, int, int, profile.ProfileSpec) ([]byte, error) {
 		return nil, nil
 	}
@@ -192,8 +192,16 @@ func TestRunPrimeFeatureQueryBranches(t *testing.T) {
 	p.PrimeQueryCmd = intPtr(0x07)
 	state = &featureProbeState{featureReadsEnabled: true}
 	runPrimeFeatureQuery(context.Background(), 10, p, state)
+	if !state.featureReadsEnabled {
+		t.Fatal("expected feature-only EPIPE to keep feature reads enabled")
+	}
+
+	p = testProfile(model.ProbePathFeatureOrInterrupt)
+	p.PrimeQueryCmd = intPtr(0x07)
+	state = &featureProbeState{featureReadsEnabled: true}
+	runPrimeFeatureQuery(context.Background(), 10, p, state)
 	if state.featureReadsEnabled {
-		t.Fatal("expected EPIPE to disable feature reads")
+		t.Fatal("expected feature-or-interrupt EPIPE to disable feature reads")
 	}
 }
 
@@ -282,12 +290,14 @@ func TestRunFeatureAttemptFeatureSuccess(t *testing.T) {
 	}
 }
 
-func TestRunFeatureAttemptEPIPEDisablesFeatureRead(t *testing.T) {
+func TestRunFeatureAttemptEPIPERetryPolicy(t *testing.T) {
 	origSendQuery := probeSendQuery
 	origRecv := probeRecvFeatureReport
+	origInterrupt := probeReadInterruptFrame
 	defer func() {
 		probeSendQuery = origSendQuery
 		probeRecvFeatureReport = origRecv
+		probeReadInterruptFrame = origInterrupt
 	}()
 
 	probeSendQuery = func(context.Context, int, int, profile.ProfileSpec) ([]byte, error) {
@@ -295,6 +305,9 @@ func TestRunFeatureAttemptEPIPEDisablesFeatureRead(t *testing.T) {
 	}
 	probeRecvFeatureReport = func(context.Context, int, byte, int) ([]byte, error) {
 		return nil, unix.EPIPE
+	}
+	probeReadInterruptFrame = func(context.Context, int, profile.ProfileSpec, int) ([]byte, error) {
+		return nil, nil
 	}
 
 	state := &featureProbeState{featureReadsEnabled: true}
@@ -311,13 +324,70 @@ func TestRunFeatureAttemptEPIPEDisablesFeatureRead(t *testing.T) {
 	if status != featureAttemptStatusRetry {
 		t.Fatalf("expected retry status, got %v", status)
 	}
-	if state.featureReadsEnabled {
-		t.Fatal("expected feature reads to be disabled after EPIPE")
+	if !state.featureReadsEnabled {
+		t.Fatal("expected feature-only EPIPE to keep feature reads enabled")
 	}
 
 	typed := &FeatureProbeError{}
 	if !errors.As(state.lastError, &typed) || typed.Code != FeatureProbeErrorReadEPIPE {
 		t.Fatalf("expected read epipe code, got %v", state.lastError)
+	}
+
+	state = &featureProbeState{featureReadsEnabled: true}
+	_, status = runFeatureAttempt(
+		context.Background(),
+		10,
+		model.HidCandidate{},
+		defaultSettings(),
+		testProfile(model.ProbePathFeatureOrInterrupt),
+		1,
+		true,
+		state,
+	)
+	if status != featureAttemptStatusRetry {
+		t.Fatalf("expected retry status, got %v", status)
+	}
+	if state.featureReadsEnabled {
+		t.Fatal("expected feature-or-interrupt EPIPE to disable feature reads")
+	}
+}
+
+func TestProbeWithFeatureOnlyRecoversFromTransientEPIPE(t *testing.T) {
+	origSendQuery := probeSendQuery
+	origRecv := probeRecvFeatureReport
+	defer func() {
+		probeSendQuery = origSendQuery
+		probeRecvFeatureReport = origRecv
+	}()
+
+	settings := defaultSettings()
+	settings.RetryCount = 2
+	p := testProfile(model.ProbePathFeatureOnly)
+	target := testTarget("/dev/hidraw0")
+
+	probeSendQuery = func(context.Context, int, int, profile.ProfileSpec) ([]byte, error) {
+		return nil, nil
+	}
+
+	readCalls := 0
+	probeRecvFeatureReport = func(context.Context, int, byte, int) ([]byte, error) {
+		readCalls++
+		if readCalls == 1 {
+			return nil, unix.EPIPE
+		}
+
+		return []byte{0x51, 0x00, 55, 1, 0xAA, 0xBB}, nil
+	}
+
+	result := probeWithFeature(context.Background(), 10, target, settings, p, discardLogger(), nil, nil)
+	if !result.Success || result.Reading == nil {
+		t.Fatalf("expected feature-only probe to recover, got %#v", result)
+	}
+	if result.Attempts != 2 {
+		t.Fatalf("expected success on second attempt, got attempt %d", result.Attempts)
+	}
+	if readCalls != 2 {
+		t.Fatalf("expected two feature reads, got %d", readCalls)
 	}
 }
 
@@ -496,6 +566,42 @@ func TestSendWakeSuccessAndShortWrite(t *testing.T) {
 	}
 	if err := sendWake(10, "/dev/hidraw0", p, discardLogger()); err == nil {
 		t.Fatal("expected short wake write error")
+	}
+}
+
+func TestDrainWakeResponseConsumesFrames(t *testing.T) {
+	origPoll := probePoll
+	origRead := probeRead
+	defer func() {
+		probePoll = origPoll
+		probeRead = origRead
+	}()
+
+	pollCalls := 0
+	readCalls := 0
+
+	probePoll = func(fds []unix.PollFd, timeout int) (int, error) {
+		pollCalls++
+		if pollCalls == 1 {
+			fds[0].Revents = unix.POLLIN
+			return 1, nil
+		}
+
+		return 0, nil
+	}
+	probeRead = func(fd int, p []byte) (int, error) {
+		readCalls++
+		copy(p, []byte{0xB2, 0x01, 0x34, 0x34, 0x44, 0xD0})
+		return 6, nil
+	}
+
+	drainWakeResponse(context.Background(), 10, "/dev/hidraw0", 1, discardLogger())
+
+	if pollCalls == 0 {
+		t.Fatal("expected wake response poll")
+	}
+	if readCalls != 1 {
+		t.Fatalf("expected one wake response read, got %d", readCalls)
 	}
 }
 

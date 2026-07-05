@@ -276,6 +276,31 @@ func TestReadInterfaceNumber(t *testing.T) {
 		}
 	})
 
+	t.Run("parent usb interface fallback", func(t *testing.T) {
+		base := t.TempDir()
+		interfaceDir := filepath.Join(base, "3-2:1.3")
+		hidDeviceDir := filepath.Join(interfaceDir, "0003:3434:D030.0008")
+		if err := os.MkdirAll(hidDeviceDir, 0o755); err != nil {
+			t.Fatalf("mkdir hid device dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(interfaceDir, "bInterfaceNumber"), []byte("03\n"), 0o644); err != nil {
+			t.Fatalf("write parent bInterfaceNumber: %v", err)
+		}
+
+		deviceLink := filepath.Join(base, "device")
+		if err := os.Symlink(hidDeviceDir, deviceLink); err != nil {
+			t.Fatalf("symlink device target: %v", err)
+		}
+
+		val := readInterfaceNumber(deviceLink)
+		if val == nil {
+			t.Fatalf("expected interface number from parent fallback")
+		}
+		if *val != 3 {
+			t.Fatalf("expected 3, got %d", *val)
+		}
+	})
+
 	t.Run("missing", func(t *testing.T) {
 		base := t.TempDir()
 		deviceLink := filepath.Join(base, "device")
@@ -394,6 +419,45 @@ func TestCandidateFromEntrySuccessUsesResolvedFallbackAndConfiguredDevRoot(t *te
 	}
 	if candidate.StableDeviceID != stableDeviceID(nil, filepath.Join(entryPath, "device")) {
 		t.Fatalf("expected blank HID_PHYS to fall back to resolved device path")
+	}
+	if candidate.InterfaceNumber == nil || *candidate.InterfaceNumber != 3 {
+		t.Fatalf("expected interface number 3, got %v", candidate.InterfaceNumber)
+	}
+}
+
+func TestCandidateFromEntryReadsInterfaceNumberFromParentUSBInterface(t *testing.T) {
+	base := t.TempDir()
+	sysfsRoot := filepath.Join(base, "sys", "class", "hidraw")
+	devRoot := filepath.Join(base, "dev")
+	withDiscoveryTestEnvironment(t, sysfsRoot, devRoot)
+
+	interfaceDir := filepath.Join(sysfsRoot, "devices", "usb3", "3-2", "3-2:1.3")
+	hidDeviceDir := filepath.Join(interfaceDir, "0003:3434:D030.0008")
+	if err := os.MkdirAll(hidDeviceDir, 0o755); err != nil {
+		t.Fatalf("mkdir hid device dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(interfaceDir, "bInterfaceNumber"), []byte("03\n"), 0o644); err != nil {
+		t.Fatalf("write parent bInterfaceNumber: %v", err)
+	}
+
+	entryPath := writeDiscoveryEntry(t, sysfsRoot, testDiscoveryEntry{
+		hidrawName:      "hidraw7",
+		hidID:           "0003:3434:D030",
+		hidName:         "Keychron Link",
+		descriptor:      []byte{0x81, 0x02},
+		resolvedDevPath: hidDeviceDir,
+	})
+	expectedPath := writeDevNode(t, devRoot, "hidraw7")
+
+	candidate, matched, err := candidateFromEntry(entryPath, "", testProfileSpec())
+	if err != nil {
+		t.Fatalf("candidateFromEntry() error = %v", err)
+	}
+	if !matched || candidate == nil {
+		t.Fatalf("expected wake candidate")
+	}
+	if candidate.Path != expectedPath {
+		t.Fatalf("expected candidate path %q, got %q", expectedPath, candidate.Path)
 	}
 	if candidate.InterfaceNumber == nil || *candidate.InterfaceNumber != 3 {
 		t.Fatalf("expected interface number 3, got %v", candidate.InterfaceNumber)

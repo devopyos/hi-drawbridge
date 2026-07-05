@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"golang.org/x/sys/unix"
 )
@@ -65,10 +66,10 @@ func ioctlWithContextN(ctx context.Context, fd int, op, arg uintptr) (int, error
 }
 
 func ioctlResultInt(v uintptr) (int, error) {
-	maxInt := ^uint(0) >> 1
-	if v > uintptr(maxInt) {
+	n, err := strconv.Atoi(strconv.FormatUint(uint64(v), 10))
+	if err != nil {
 		return 0, fmt.Errorf("ioctl returned out-of-range result %d", v)
 	}
 
-	return int(v), nil //nolint:gosec // G115: v is bounded above by maxInt immediately above.
+	return n, nil
 }

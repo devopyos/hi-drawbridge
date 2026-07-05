@@ -69,6 +69,9 @@ func ProbeTarget(
 	if p.ProbePath != model.ProbePathPassive {
 		wakeError = sendWake(wakeFd, wakeCandidate.Path, p, logger)
 		closed.markIfClosed(wakeError, wakeFd)
+		if wakeError == nil {
+			drainWakeResponse(ctx, wakeFd, wakeCandidate.Path, settings.RetryDelayMs, logger)
+		}
 		if !waitWithContext(ctx, retryDelay) {
 			return makeProbeResult(target, wakePath, wakeError, false, 0, nil, ctx.Err(), nil, nil)
 		}
