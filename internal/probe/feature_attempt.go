@@ -46,9 +46,11 @@ func (s *featureProbeState) setErrorCode(code FeatureProbeErrorCode) {
 	s.lastError = newFeatureProbeErrorCode(code)
 }
 
-func (s *featureProbeState) setFeatureReadError(err error) {
+func (s *featureProbeState) setFeatureReadError(err error, disableOnEPIPE bool) {
 	if isEPIPE(err) {
-		s.featureReadsEnabled = false
+		if disableOnEPIPE {
+			s.featureReadsEnabled = false
+		}
 		s.setErrorCode(FeatureProbeErrorReadEPIPE)
 
 		return
@@ -76,7 +78,7 @@ func runPrimeFeatureQuery(ctx context.Context, queryFd int, p profile.ProfileSpe
 	//nolint:gosec // query_report_id is validated as a byte during profile config loading.
 	_, err = probeRecvFeatureReport(ctx, queryFd, byte(p.QueryReportID), p.QueryLength)
 	if err != nil {
-		state.setFeatureReadError(err)
+		state.setFeatureReadError(err, p.ProbePath == model.ProbePathFeatureOrInterrupt)
 	}
 }
 
@@ -105,7 +107,7 @@ func readFeatureProbeAttempt(
 		//nolint:gosec // query_report_id is validated as a byte during profile config loading.
 		frame, err := probeRecvFeatureReport(ctx, queryFd, byte(p.QueryReportID), p.QueryLength)
 		if err != nil {
-			state.setFeatureReadError(err)
+			state.setFeatureReadError(err, p.ProbePath == model.ProbePathFeatureOrInterrupt)
 
 			break
 		}

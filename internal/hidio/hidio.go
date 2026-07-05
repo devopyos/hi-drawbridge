@@ -26,9 +26,9 @@ const (
 	iocSizeShift = iocTypeShift + iocTypeBits
 	iocDirShift  = iocSizeShift + iocSizeBits
 
-	iocWrite      = 0x01
-	iocRead       = 0x02
-	hidrawIOCType = 'H'
+	iocWrite      uint32 = 0x01
+	iocRead       uint32 = 0x02
+	hidrawIOCType uint32 = 'H'
 
 	maxHIDReportLength   = 256
 	maxInterruptReadSize = 256
@@ -43,20 +43,28 @@ var hidWrite = unix.Write
 
 var ioctlWithContextNFn = ioctlWithContextN
 
-func ioc(dir, typ, nr, size uintptr) uintptr {
-	return (dir << iocDirShift) | (typ << iocTypeShift) | (nr << iocNRShift) | (size << iocSizeShift)
+func ioc(dir, typ, nr, size uint32) uintptr {
+	req := (dir << iocDirShift) | (typ << iocTypeShift) | (nr << iocNRShift) | (size << iocSizeShift)
+	return uintptr(req)
+}
+
+func hidReportLengthSize(length int) uint32 {
+	var size uint32
+	for range length {
+		size++
+	}
+
+	return size
 }
 
 // HidSetFeatureRequest returns the ioctl request code for HID_SET_FEATURE with the given payload length.
 func HidSetFeatureRequest(length int) uintptr {
-	//nolint:gosec // ioctl request size expects uintptr; caller controls and bounds payload length.
-	return ioc(iocWrite|iocRead, hidrawIOCType, 0x06, uintptr(length))
+	return ioc(iocWrite|iocRead, hidrawIOCType, 0x06, hidReportLengthSize(length))
 }
 
 // HidGetFeatureRequest returns the ioctl request code for HID_GET_FEATURE with the given buffer length.
 func HidGetFeatureRequest(length int) uintptr {
-	//nolint:gosec // ioctl request size expects uintptr; caller controls and bounds payload length.
-	return ioc(iocWrite|iocRead, hidrawIOCType, 0x07, uintptr(length))
+	return ioc(iocWrite|iocRead, hidrawIOCType, 0x07, hidReportLengthSize(length))
 }
 
 // SendFeatureReport sends a HID feature report with the given report ID and payload.

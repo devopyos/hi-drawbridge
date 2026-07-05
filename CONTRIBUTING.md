@@ -7,7 +7,7 @@ If you want to help, great!
 You will want:
 
 - Linux
-- Go `1.26.2`
+- Go `1.26.3`
 - actual access to `hidraw` devices if you are testing against real hardware
 - a bit of patience if you are reverse engineering vendor HID weirdness
 

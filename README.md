@@ -41,7 +41,7 @@ And sure, this could have been a one-off script. But the reverse engineering cos
 - Linux
 - Access to `/dev/hidraw*`
 - Session D-Bus if you want to run `serve`
-- Go `1.26.2` if you are building from source
+- Go `1.26.3` if you are building from source
 
 No root is required for normal runtime use, but you may need a `udev` rule so your desktop user can actually access the relevant `hidraw` node.
 

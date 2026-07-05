@@ -16,6 +16,8 @@ import (
 	"github.com/devopyos/hi-drawbridge/internal/profile"
 )
 
+const wakeDrainReadSize = 256
+
 func makeProbeResult(
 	target model.ProbeTarget,
 	wakePath *string,
@@ -67,6 +69,112 @@ func sendWake(wakeFd int, wakePath string, p profile.ProfileSpec, logger *slog.L
 	}
 
 	return nil
+}
+
+func drainWakeResponse(
+	ctx context.Context,
+	wakeFd int,
+	wakePath string,
+	retryDelayMs int,
+	logger *slog.Logger,
+) {
+	timeoutMs := max(60, retryDelayMs*4)
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+	readBuf := make([]byte, wakeDrainReadSize)
+
+	//nolint:gosec // wakeFd comes from unix.Open and is a non-negative OS file descriptor.
+	pollFds := []unix.PollFd{{Fd: int32(wakeFd), Events: unix.POLLIN | unix.POLLERR | unix.POLLHUP | unix.POLLNVAL}}
+
+	for {
+		remaining, ok := wakeDrainRemaining(ctx, deadline)
+		if !ok {
+			return
+		}
+
+		n, ok := pollWakeResponse(wakePath, pollFds, remaining, logger)
+		if !ok {
+			return
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		if !drainWakeFrames(wakeFd, wakePath, readBuf, n, logger) {
+			return
+		}
+	}
+}
+
+func wakeDrainRemaining(ctx context.Context, deadline time.Time) (time.Duration, bool) {
+	if err := ctx.Err(); err != nil {
+		return 0, false
+	}
+
+	remaining := time.Until(deadline)
+	return remaining, remaining > 0
+}
+
+func pollWakeResponse(
+	wakePath string,
+	pollFds []unix.PollFd,
+	remaining time.Duration,
+	logger *slog.Logger,
+) (int, bool) {
+	pollTimeout := max(1, int(min(remaining, 25*time.Millisecond).Milliseconds()))
+	n, err := probePoll(pollFds, pollTimeout)
+	if err != nil {
+		if isRetryablePollErr(err) {
+			return 0, true
+		}
+
+		if logger != nil {
+			logger.Debug("wake response poll failed", "path", wakePath, "error", formatOSError(err))
+		}
+
+		return 0, false
+	}
+
+	if n == 0 {
+		return 0, true
+	}
+
+	if pollFds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+		if logger != nil {
+			logger.Debug("wake response poll ended", "path", wakePath, "revents", int(pollFds[0].Revents))
+		}
+
+		return 0, false
+	}
+
+	return n, true
+}
+
+func drainWakeFrames(wakeFd int, wakePath string, readBuf []byte, reads int, logger *slog.Logger) bool {
+	for range reads {
+		nRead, err := probeRead(wakeFd, readBuf)
+		if err != nil {
+			if isRetryableReadErr(err) {
+				continue
+			}
+
+			if logger != nil {
+				logger.Debug("wake response read failed", "path", wakePath, "error", formatOSError(err))
+			}
+
+			return false
+		}
+
+		if nRead <= 0 {
+			continue
+		}
+
+		if logger != nil {
+			logger.Debug("wake response frame", "path", wakePath, "frame_hex", hex.EncodeToString(readBuf[:nRead]))
+		}
+	}
+
+	return true
 }
 
 func probeWithFeature(
